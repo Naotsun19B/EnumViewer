@@ -20,13 +20,15 @@ enum class EEnumViewerDeveloperType : uint8
 	CurrentUser,
 	// Allow all users' developer folders to be displayed.
 	All,
+	// Max developer type.
+	Max,
 };
 
 /**
  * Editor settings for enum viewer.
  */
 UCLASS(config = Editor, defaultconfig)
-class STRUCTVIEWER_API UEnumViewerSettings : public UObject
+class ENUMVIEWER_API UEnumViewerSettings : public UObject
 {
 	GENERATED_BODY()
 
@@ -41,11 +43,20 @@ public:
 
 	// Whether to display internal use structs.
 	UPROPERTY(EditAnywhere, Config, Category = "Enum Viewer")
-	bool DisplayInternalEnums;
+	bool bDisplayInternalEnums;
 
 	// The developer folder view modes used in SStructViewer
 	UPROPERTY(EditAnywhere, Config, Category = "Enum Viewer")
 	EEnumViewerDeveloperType DeveloperFolderType;
+
+public:
+	// Returns an event delegate that is executed when a setting has changed.
+	DECLARE_EVENT_OneParam(UEnumViewerSettings, FSettingChangedEvent, FName /* PropertyName */);
+	static FSettingChangedEvent& OnSettingChanged() { return SettingChangedEvent; }
+
+private:
+	// Holds an event delegate that is executed when a setting has changed.
+	static FSettingChangedEvent SettingChangedEvent;
 	
 public:
 	// Constructor.
@@ -58,17 +69,21 @@ public:
 	// Returns reference of this settings.
 	static const UEnumViewerSettings& Get();
 
+	// Partial friend modifier for changing some properties from the SEnumViewer.
+	struct FEnumViewerModifier
+	{
+	public:
+		friend class SEnumViewer;
+		UEnumViewerSettings* This = nullptr;
+
+		FEnumViewerModifier();
+
+		void SetDisplayInternalEnums(bool bNewState);
+		void SetDeveloperFolderType(EEnumViewerDeveloperType NewType);
+	};
+	
 protected:
 	// UObject interface.
 	virtual void PostEditChangeProperty(struct FPropertyChangedEvent& PropertyChangedEvent) override;
 	// End of UObject interface.
-	
-public:
-	// Returns an event delegate that is executed when a setting has changed.
-	DECLARE_EVENT_OneParam(UEnumViewerSettings, FSettingChangedEvent, FName /* PropertyName */);
-	static FSettingChangedEvent& OnSettingChanged() { return SettingChangedEvent; }
-
-private:
-	// Holds an event delegate that is executed when a setting has changed.
-	static FSettingChangedEvent SettingChangedEvent;
 };

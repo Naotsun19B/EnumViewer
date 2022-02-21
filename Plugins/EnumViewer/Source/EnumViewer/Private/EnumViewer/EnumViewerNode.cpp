@@ -18,7 +18,7 @@ namespace EnumViewer
 
 	FEnumViewerNodeData::FEnumViewerNodeData(const UEnum* InEnum)
 		: EnumName(InEnum->GetName())
-		, EnumDisplayName(InEnum->GetName())
+		, EnumDisplayName(FText::FromString(InEnum->GetName()))
 		, EnumPath(*InEnum->GetPathName())
 		, Enum(InEnum)
 	{
@@ -33,7 +33,7 @@ namespace EnumViewer
 
 		// Cache the resolved display name if available, or synthesize one if the enum asset is unloaded
 		EnumDisplayName = Enum.IsValid()
-			? Enum->GetName()
+			? FText::FromString(Enum->GetName())
 			: FText::AsCultureInvariant(FName::NameToDisplayString(EnumName, false));
 	}
 

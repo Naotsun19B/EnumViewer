@@ -22,8 +22,9 @@ namespace EnumViewer
 	}
 }
 
+UEnumViewerSettings::FSettingChangedEvent UEnumViewerSettings::SettingChangedEvent;
+
 UEnumViewerSettings::UEnumViewerSettings()
-	: Super()
 {
 }
 
@@ -59,6 +60,24 @@ const UEnumViewerSettings& UEnumViewerSettings::Get()
 	const auto* Settings = GetDefault<UEnumViewerSettings>();
 	check(IsValid(Settings));
 	return *Settings;
+}
+
+UEnumViewerSettings::FEnumViewerModifier::FEnumViewerModifier()
+{
+	This = GetMutableDefault<UEnumViewerSettings>();
+	check(IsValid(This));
+}
+
+void UEnumViewerSettings::FEnumViewerModifier::SetDisplayInternalEnums(bool bNewState)
+{
+	This->bDisplayInternalEnums = bNewState;
+	This->PostEditChange();
+}
+
+void UEnumViewerSettings::FEnumViewerModifier::SetDeveloperFolderType(EEnumViewerDeveloperType NewType)
+{
+	This->DeveloperFolderType = NewType;
+	This->PostEditChange();
 }
 
 void UEnumViewerSettings::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)

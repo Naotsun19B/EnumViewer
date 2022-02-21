@@ -26,9 +26,14 @@ public class EnumViewer : ModuleRules
 			new string[]
 			{
 				"CoreUObject",
+				"InputCore",
 				"Engine",
+				"UnrealEd",
 				"Slate",
-				"SlateCore",
+				"SlateCore", 
+				"EditorStyle",
+				"EditorWidgets",
+				"ContentBrowserData",
 			}
 		);
 		

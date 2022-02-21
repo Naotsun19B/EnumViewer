@@ -28,19 +28,15 @@
 #include "Widgets/Layout/SSeparator.h"
 #include "Widgets/Input/SComboButton.h"
 #include "Widgets/Layout/SScrollBorder.h"
-#include "Framework/Docking/TabManager.h"
 #include "SListViewSelectorDropdownMenu.h"
 
-#include "ARFilter.h"
-#include "AssetData.h"
+
 #include "AssetRegistryModule.h"
 
 #include "ContentBrowserDataDragDropOp.h"
 
 #include "Editor/UnrealEdEngine.h"
 #include "Engine/UserDefinedEnum.h"
-#include "EditorDirectories.h"
-#include "Dialogs/Dialogs.h"
 
 #include "IDocumentation.h"
 #include "PropertyHandle.h"
@@ -54,67 +50,6 @@ DEFINE_LOG_CATEGORY_STATIC(LogEditorEnumViewer, Log, All);
 
 namespace EnumViewer
 {
-	EEnumFilterReturn FEnumViewerFilterFunctions::IfInChildOfEnumsSet(TSet<const UEnum*>& InSet, const UEnum* InEnum)
-	{
-		check(InEnum);
-
-		if (InSet.Num())
-		{
-			// If a enum is a child of any enums on this list, it will be allowed onto the list, unless it also appears on a disallowed list.
-			for (const UEnum* CurEnum : InSet)
-			{
-				if (InEnum->IsChildOf(CurEnum))
-				{
-					return EEnumFilterReturn::Passed;
-				}
-			}
-
-			return EEnumFilterReturn::Failed;
-		}
-
-		// Since there are none on this list, return that there is no items.
-		return EEnumFilterReturn::NoItems;
-	}
-
-	EEnumFilterReturn FEnumViewerFilterFunctions::IfMatchesAllInChildOfEnumsSet(TSet<const UEnum*>& InSet, const UEnum* InEnum)
-	{
-		check(InEnum);
-
-		if (InSet.Num())
-		{
-			// If a enum is a child of any enums on this list, it will be allowed onto the list, unless it also appears on a disallowed list.
-			for (const UEnum* CurEnum : InSet)
-			{
-				if (!InEnum->IsChildOf(CurEnum))
-				{
-					// Since it doesn't match one, it fails.
-					return EEnumFilterReturn::Failed;
-				}
-			}
-
-			// It matches all of them, so it passes.
-			return EEnumFilterReturn::Passed;
-		}
-
-		// Since there are none on this list, return that there is no items.
-		return EEnumFilterReturn::NoItems;
-	}
-
-	EEnumFilterReturn FEnumViewerFilterFunctions::IfInEnumsSet(TSet<const UEnum*>& InSet, const UEnum* InEnum)
-	{
-		check(InEnum);
-
-		if (InSet.Num())
-		{
-			return InSet.Contains(InEnum)
-				? EEnumFilterReturn::Passed
-				: EEnumFilterReturn::Failed;
-		}
-
-		// Since there are none on this list, return that there is no items.
-		return EEnumFilterReturn::NoItems;
-	}
-
 	class FEnumHierarchy
 	{
 	public:
@@ -164,27 +99,7 @@ namespace EnumViewer
 
 		/** Populates the enum hierarchy tree, pulling all the loaded and unloaded enums into a master data tree */
 		void PopulateEnumHierarchy();
-
-		/**
-		 * Recursively searches through the hierarchy to find and remove the asset. Used when deleting assets.
-		 *
-		 * @param InRootNode	The node to start the search from.
-		 * @param InEnumPath	The path name of the enum to delete
-		 *
-		 * @return Returns true if the enum was found and deleted successfully.
-		 */
-		bool FindAndRemoveNodeByEnumPath(const TSharedRef<FEnumViewerNodeData>& InRootNode, const FName InEnumPath);
-		bool FindAndRemoveNodeByEnumPath(const FName InEnumPath)
-		{
-			return FindAndRemoveNodeByEnumPath(GetEnumRootNode(), InEnumPath);
-		}
-
-		/** Callback registered to the Asset Registry to be notified when an asset is added. */
-		void AddAsset(const FAssetData& InAddedAssetData);
-
-		/** Callback registered to the Asset Registry to be notified when an asset is removed. */
-		void RemoveAsset(const FAssetData& InRemovedAssetData);
-
+		
 		/** Called when hot reload has finished */
 		void OnHotReload(bool bWasTriggeredAutomatically);
 
@@ -207,381 +122,332 @@ namespace EnumViewer
 
 	TUniquePtr<FEnumHierarchy> FEnumHierarchy::Singleton;
 
-	namespace EnumViewer
+	namespace Helpers
 	{
-		namespace Helpers
+		/**
+		 * Checks if the enum is allowed under the init options of the enum viewer currently building it's tree/list.
+		 * @param InInitOptions		The enum viewer's options, holds the AllowedEnums and DisallowedEnums.
+		 * @param InEnum			The enum to test against.
+		 */
+		bool IsEnumAllowed(const FEnumViewerInitializationOptions& InInitOptions, const TWeakObjectPtr<const UEnum> InEnum)
 		{
-			/**
-			 * Checks if the enum is allowed under the init options of the enum viewer currently building it's tree/list.
-			 * @param InInitOptions		The enum viewer's options, holds the AllowedEnums and DisallowedEnums.
-			 * @param InEnum			The enum to test against.
-			 */
-			bool IsEnumAllowed(const FEnumViewerInitializationOptions& InInitOptions, const TWeakObjectPtr<const UEnum> InEnum)
+			if (InInitOptions.EnumFilter.IsValid())
 			{
-				if (InInitOptions.EnumFilter.IsValid())
+				return InInitOptions.EnumFilter->IsEnumAllowed(InInitOptions, InEnum.Get());
+			}
+			return true;
+		}
+
+		/**
+		 * Checks if the unloaded enum is allowed under the init options of the enum viewer currently building it's tree/list.
+		 * @param InInitOptions		The enum viewer's options, holds the AllowedEnums and DisallowedEnums.
+		 * @param InEnumPath		The path name to test against.
+		 */
+		bool IsEnumAllowed_UnloadedEnum(const FEnumViewerInitializationOptions& InInitOptions, const FName InEnumPath)
+		{
+			if (InInitOptions.EnumFilter.IsValid())
+			{
+				return InInitOptions.EnumFilter->IsUnloadedEnumAllowed(InInitOptions, InEnumPath);
+			}
+			return true;
+		}
+
+		/**
+		 * Checks if the TestString passes the filter.
+		 * @param InTestString		The string to test against the filter.
+		 * @param InTextFilter		Compiled text filter to apply.
+		 * @return	true if it passes the filter.
+		 */
+		bool PassesFilter(const FString& InTestString, const FTextFilterExpressionEvaluator& InTextFilter)
+		{
+			return InTextFilter.TestTextFilter(FBasicStringFilterExpressionContext(InTestString));
+		}
+
+		/**
+		 * Recursive function to build a tree, filtering out nodes based on the InitOptions and filter search terms.
+		 * @param InInitOptions						The enum viewer's options, holds the AllowedEnums and DisallowedEnums.
+		 * @param InOutRootNode						The node that this function will add the children of to the tree.
+		 * @param InOriginalRootNode				The original root node holding the data we produce a filtered node for.
+		 * @param InTextFilter						Compiled text filter to apply.
+		 * @param bInShowUnloadedEnums			Filter option to not remove unloaded enums due to enum filter options.
+		 * @param InAllowedDeveloperType            Filter option for dealing with developer folders.
+		 * @param bInInternalEnums                Filter option for showing internal enums.
+		 * @param InternalEnums                   The enums that have been marked as Internal Only.
+		 * @param InternalPaths                     The paths that have been marked Internal Only.
+		 * @return Returns true if the child passed the filter.
+		 */
+		bool AddChildren_Tree(
+			const FEnumViewerInitializationOptions& InInitOptions, 
+			const TSharedRef<FEnumViewerNode>& InOutRootNode,
+			const TSharedRef<FEnumViewerNodeData>& InOriginalRootNode, 
+			const FTextFilterExpressionEvaluator& InTextFilter,
+			const bool bInShowUnloadedEnums, 
+			const EEnumViewerDeveloperType InAllowedDeveloperType,
+			const bool bInInternalEnums,
+			const TArray<const UEnum*>& InternalEnums,
+			const TArray<FDirectoryPath>& InternalPaths
+			)
+		{
+			static const FString DeveloperPathWithSlash = FPackageName::FilenameToLongPackageName(FPaths::GameDevelopersDir());
+			static const FString UserDeveloperPathWithSlash = FPackageName::FilenameToLongPackageName(FPaths::GameUserDeveloperDir());
+
+			const UEnum* OriginalRootNodeEnum = InOriginalRootNode->GetEnum();
+
+			// Determine if we allow any developer folder classes, if so determine if this enum is in one of the allowed developer folders.
+			const FString GeneratedEnumPathString = InOriginalRootNode->GetEnumPath().ToString();
+			bool bPassesDeveloperFilter = true;
+			if (InAllowedDeveloperType == EEnumViewerDeveloperType::None)
+			{
+				bPassesDeveloperFilter = !GeneratedEnumPathString.StartsWith(DeveloperPathWithSlash);
+			}
+			else if (InAllowedDeveloperType == EEnumViewerDeveloperType::CurrentUser)
+			{
+				if (GeneratedEnumPathString.StartsWith(DeveloperPathWithSlash))
 				{
-					return InInitOptions.EnumFilter->IsEnumAllowed(InInitOptions, InEnum.Get(), MakeShared<FEnumViewerFilterFunctions>());
+					bPassesDeveloperFilter = GeneratedEnumPathString.StartsWith(UserDeveloperPathWithSlash);
 				}
-				return true;
 			}
 
-			/**
-			 * Checks if the unloaded enum is allowed under the init options of the enum viewer currently building it's tree/list.
-			 * @param InInitOptions		The enum viewer's options, holds the AllowedEnums and DisallowedEnums.
-			 * @param InEnumPath		The path name to test against.
-			 */
-			bool IsEnumAllowed_UnloadedEnum(const FEnumViewerInitializationOptions& InInitOptions, const FName InEnumPath)
+			// The INI files declare enums and folders that are considered internal only. Does this enum match any of those patterns?
+			// INI path: /Script/EnumViewer.EnumViewerProjectSettings
+			bool bPassesInternalFilter = true;
+			if (!bInInternalEnums && InternalPaths.Num() > 0)
 			{
-				if (InInitOptions.EnumFilter.IsValid())
+				for (const FDirectoryPath& InternalPath : InternalPaths)
 				{
-					return InInitOptions.EnumFilter->IsUnloadedEnumAllowed(InInitOptions, InEnumPath, MakeShared<FEnumViewerFilterFunctions>());
+					if (GeneratedEnumPathString.StartsWith(InternalPath.Path))
+					{
+						bPassesInternalFilter = false;
+						break;
+					}
 				}
-				return true;
 			}
 
-			/**
-			 * Checks if the TestString passes the filter.
-			 * @param InTestString		The string to test against the filter.
-			 * @param InTextFilter		Compiled text filter to apply.
-			 * @return	true if it passes the filter.
-			 */
-			bool PassesFilter(const FString& InTestString, const FTextFilterExpressionEvaluator& InTextFilter)
+			// There are few options for filtering an unloaded enum, if it matches with this filter, it passes.
+			bool bReturnPassesFilter = false;
+			if (OriginalRootNodeEnum)
 			{
-				return InTextFilter.TestTextFilter(FBasicStringFilterExpressionContext(InTestString));
+				bReturnPassesFilter = bPassesDeveloperFilter && bPassesInternalFilter && IsEnumAllowed(InInitOptions, OriginalRootNodeEnum) && PassesFilter(InOriginalRootNode->GetEnumName(), InTextFilter);
+			}
+			else
+			{
+				if (bInShowUnloadedEnums)
+				{
+					bReturnPassesFilter = bPassesDeveloperFilter && bPassesInternalFilter && IsEnumAllowed_UnloadedEnum(InInitOptions, InOutRootNode->GetEnumPath()) && PassesFilter(InOriginalRootNode->GetEnumName(), InTextFilter);
+				}
+			}
+			InOutRootNode->PassedFilter(bReturnPassesFilter);
+
+			return bReturnPassesFilter;
+		}
+
+		/**
+		 * Builds the enum tree.
+		 * @param InInitOptions						The enum viewer's options, holds the AllowedEnums and DisallowedEnums.
+		 * @param InOutRootNode						The node to root the tree to.
+		 * @param InTextFilter						Compiled text filter to apply.
+		 * @param bInShowUnloadedEnums			Filter option to not remove unloaded enums due to enum filter options.
+		 * @param InAllowedDeveloperType            Filter option for dealing with developer folders.
+		 * @param bInInternalEnums                Filter option for showing internal enums.
+		 * @param InternalEnums                   The enums that have been marked as Internal Only.
+		 * @param InternalPaths                     The paths that have been marked Internal Only.
+		 * @return A fully built tree.
+		 */
+		void GetEnumTree(
+			const FEnumViewerInitializationOptions& InInitOptions, 
+			TSharedPtr<FEnumViewerNode>& InOutRootNode,
+			const FTextFilterExpressionEvaluator& InTextFilter, 
+			const bool bInShowUnloadedEnums,
+			const EEnumViewerDeveloperType InAllowedDeveloperType = EEnumViewerDeveloperType::All,
+			const bool bInInternalEnums = true,
+			const TArray<const UEnum*>& InternalEnums = TArray<const UEnum*>(),
+			const TArray<FDirectoryPath>& InternalPaths = TArray<FDirectoryPath>()
+			)
+		{
+			const TSharedRef<FEnumViewerNodeData> EnumRootNode = FEnumHierarchy::Get().GetEnumRootNode();
+
+			// Make a dummy root node
+			InOutRootNode = MakeShared<FEnumViewerNode>();
+
+			AddChildren_Tree(InInitOptions, InOutRootNode.ToSharedRef(), EnumRootNode, InTextFilter, bInShowUnloadedEnums, InAllowedDeveloperType, bInInternalEnums, InternalEnums, InternalPaths);
+		}
+
+		/**
+		 * Recursive function to build the list, filtering out nodes based on the InitOptions and filter search terms.
+		 * @param InInitOptions						The enum viewer's options, holds the AllowedEnums and DisallowedEnums.
+		 * @param InOutNodeList						The list to add all the nodes to.
+		 * @param InOriginalRootNode				The original root node holding the data we produce a filtered node for.
+		 * @param InTextFilter						Compiled text filter to apply.
+		 * @param bInShowUnloadedEnums			Filter option to not remove unloaded enums due to enum filter options.
+		 * @param InAllowedDeveloperType            Filter option for dealing with developer folders.
+		 * @param bInInternalEnums                Filter option for showing internal enums.
+		 * @param InternalEnums                   The enums that have been marked as Internal Only.
+		 * @param InternalPaths                     The paths that have been marked Internal Only.
+		 * @return Returns true if the child passed the filter.
+		 */
+		void AddChildren_List(
+			const FEnumViewerInitializationOptions& InInitOptions, 
+			TArray<TSharedPtr<FEnumViewerNode>>& InOutNodeList,
+			const TSharedRef<FEnumViewerNodeData>& InOriginalRootNode, 
+			const FTextFilterExpressionEvaluator& InTextFilter,
+			const bool bInShowUnloadedEnums,
+			const EEnumViewerDeveloperType InAllowedDeveloperType,
+			const bool bInInternalEnums,
+			const TArray<const UEnum*>& InternalEnums, 
+			const TArray<FDirectoryPath>& InternalPaths
+			)
+		{
+			static const FString DeveloperPathWithSlash = FPackageName::FilenameToLongPackageName(FPaths::GameDevelopersDir());
+			static const FString UserDeveloperPathWithSlash = FPackageName::FilenameToLongPackageName(FPaths::GameUserDeveloperDir());
+
+			const UEnum* OriginalRootNodeEnum = InOriginalRootNode->GetEnum();
+
+			// Determine if we allow any developer folder enums, if so determine if this enum is in one of the allowed developer folders.
+			const FString GeneratedEnumPathString = InOriginalRootNode->GetEnumPath().ToString();
+			bool bPassesDeveloperFilter = true;
+			if (InAllowedDeveloperType == EEnumViewerDeveloperType::None)
+			{
+				bPassesDeveloperFilter = !GeneratedEnumPathString.StartsWith(DeveloperPathWithSlash);
+			}
+			else if (InAllowedDeveloperType == EEnumViewerDeveloperType::CurrentUser)
+			{
+				if (GeneratedEnumPathString.StartsWith(DeveloperPathWithSlash))
+				{
+					bPassesDeveloperFilter = GeneratedEnumPathString.StartsWith(UserDeveloperPathWithSlash);
+				}
 			}
 
-			/**
-			 * Recursive function to build a tree, filtering out nodes based on the InitOptions and filter search terms.
-			 * @param InInitOptions						The enum viewer's options, holds the AllowedEnums and DisallowedEnums.
-			 * @param InOutRootNode						The node that this function will add the children of to the tree.
-			 * @param InOriginalRootNode				The original root node holding the data we produce a filtered node for.
-			 * @param InTextFilter						Compiled text filter to apply.
-			 * @param bInShowUnloadedEnums			Filter option to not remove unloaded enums due to enum filter options.
-			 * @param InAllowedDeveloperType            Filter option for dealing with developer folders.
-			 * @param bInInternalEnums                Filter option for showing internal enums.
-			 * @param InternalEnums                   The enums that have been marked as Internal Only.
-			 * @param InternalPaths                     The paths that have been marked Internal Only.
-			 * @return Returns true if the child passed the filter.
-			 */
-			bool AddChildren_Tree(
-				const FEnumViewerInitializationOptions& InInitOptions, 
-				const TSharedRef<FEnumViewerNode>& InOutRootNode,
-				const TSharedRef<FEnumViewerNodeData>& InOriginalRootNode, 
-				const FTextFilterExpressionEvaluator& InTextFilter,
-				const bool bInShowUnloadedEnums, 
-				const EEnumViewerDeveloperType InAllowedDeveloperType,
-				const bool bInInternalEnums,
-				const TArray<const UEnum*>& InternalEnums,
-				const TArray<FDirectoryPath>& InternalPaths
-				)
+			// The INI files declare enums and folders that are considered internal only. Does this enum match any of those patterns?
+			// INI path: /Script/EnumViewer.EnumViewerProjectSettings
+			bool bPassesInternalFilter = true;
+			if (!bInInternalEnums && InternalPaths.Num() > 0)
 			{
-				static const FString DeveloperPathWithSlash = FPackageName::FilenameToLongPackageName(FPaths::GameDevelopersDir());
-				static const FString UserDeveloperPathWithSlash = FPackageName::FilenameToLongPackageName(FPaths::GameUserDeveloperDir());
-
-				const UEnum* OriginalRootNodeEnum = InOriginalRootNode->GetEnum();
-
-				// Determine if we allow any developer folder classes, if so determine if this enum is in one of the allowed developer folders.
-				const FString GeneratedEnumPathString = InOriginalRootNode->GetEnumPath().ToString();
-				bool bPassesDeveloperFilter = true;
-				if (InAllowedDeveloperType == EEnumViewerDeveloperType::None)
+				for (const FDirectoryPath& InternalPath : InternalPaths)
 				{
-					bPassesDeveloperFilter = !GeneratedEnumPathString.StartsWith(DeveloperPathWithSlash);
-				}
-				else if (InAllowedDeveloperType == EEnumViewerDeveloperType::CurrentUser)
-				{
-					if (GeneratedEnumPathString.StartsWith(DeveloperPathWithSlash))
+					if (GeneratedEnumPathString.StartsWith(InternalPath.Path))
 					{
-						bPassesDeveloperFilter = GeneratedEnumPathString.StartsWith(UserDeveloperPathWithSlash);
+						bPassesInternalFilter = false;
+						break;
 					}
 				}
+			}
 
-				// The INI files declare enums and folders that are considered internal only. Does this enum match any of those patterns?
-				// INI path: /Script/EnumViewer.EnumViewerProjectSettings
-				bool bPassesInternalFilter = true;
-				if (!bInInternalEnums && InternalPaths.Num() > 0)
+			// There are few options for filtering an unloaded enum, if it matches with this filter, it passes.
+			bool bPassedFilter = false;
+			if (OriginalRootNodeEnum)
+			{
+				bPassedFilter = bPassesDeveloperFilter && bPassesInternalFilter && IsEnumAllowed(InInitOptions, OriginalRootNodeEnum) && PassesFilter(InOriginalRootNode->GetEnumName(), InTextFilter);
+			}
+			else
+			{
+				if (bInShowUnloadedEnums)
 				{
-					for (const FDirectoryPath& InternalPath : InternalPaths)
-					{
-						if (GeneratedEnumPathString.StartsWith(InternalPath.Path))
-						{
-							bPassesInternalFilter = false;
-							break;
-						}
-					}
+					bPassedFilter = bPassesDeveloperFilter && bPassesInternalFilter && IsEnumAllowed_UnloadedEnum(InInitOptions, InOriginalRootNode->GetEnumPath()) && PassesFilter(InOriginalRootNode->GetEnumName(), InTextFilter);
 				}
-				if (!bInInternalEnums && InternalEnums.Num() > 0 && bPassesInternalFilter && OriginalRootNodeEnum)
-				{
-					for (const UEnum* InternalEnum : InternalEnums)
-					{
-						if (OriginalRootNodeEnum->IsChildOf(InternalEnum))
-						{
-							bPassesInternalFilter = false;
-							break;
-						}
-					}
-				}
+			}
 
-				// There are few options for filtering an unloaded enum, if it matches with this filter, it passes.
-				bool bReturnPassesFilter = false;
-				if (OriginalRootNodeEnum)
+			if (bPassedFilter)
+			{
+				InOutNodeList.Add(MakeShared<FEnumViewerNode>(InOriginalRootNode, InInitOptions.PropertyHandle, bPassedFilter));
+			}
+		}
+
+		/**
+		 * Builds the enum list.
+		 * @param InInitOptions						The enum viewer's options, holds the AllowedEnums and DisallowedEnums.
+		 * @param InOutNodeList						The list to add all the nodes to.
+		 * @param InTextFilter						Compiled text filter to apply.
+		 * @param bInShowUnloadedEnums			Filter option to not remove unloaded enums due to enum filter options.
+		 * @param InAllowedDeveloperType            Filter option for dealing with developer folders.
+		 * @param bInInternalEnums                Filter option for showing internal enums.
+		 * @param InternalEnums                   The enums that have been marked as Internal Only.
+		 * @param InternalPaths                     The paths that have been marked Internal Only.
+		 * @return A fully built list.
+		 */
+		void GetEnumList(
+			const FEnumViewerInitializationOptions& InInitOptions, 
+			TArray<TSharedPtr<FEnumViewerNode>>& InOutNodeList,
+			const FTextFilterExpressionEvaluator& InTextFilter, 
+			const bool bInShowUnloadedEnums,
+			const EEnumViewerDeveloperType InAllowedDeveloperType = EEnumViewerDeveloperType::All,
+			const bool bInInternalEnums = true,
+			const TArray<const UEnum*>& InternalEnums = TArray<const UEnum*>(), 
+			const TArray<FDirectoryPath>& InternalPaths = TArray<FDirectoryPath>()
+			)
+		{
+			const TSharedRef<FEnumViewerNodeData> EnumRootNode = FEnumHierarchy::Get().GetEnumRootNode();
+		}
+
+		/**
+		 * Opens an asset editor for a user defined enum.
+		 */
+		void OpenAssetEditor(const UUserDefinedEnum* InEnum)
+		{
+			if (InEnum)
+			{
+				GEditor->GetEditorSubsystem<UAssetEditorSubsystem>()->OpenEditorForAsset(const_cast<UUserDefinedEnum*>(InEnum));
+			}
+		}
+
+		/**
+		 * Opens a enum source file.
+		 */
+		void OpenEnumInIDE(const UEnum* InEnum)
+		{
+			//FSourceCodeNavigation::NavigateToEnum(InEnum);
+		}
+
+		/**
+		 * Finds the enum in the content browser.
+		 */
+		void FindInContentBrowser(const UEnum* InEnum)
+		{
+			if (InEnum)
+			{
+				TArray<UObject*> Objects;
+				Objects.Add(const_cast<UEnum*>(InEnum));
+				GEditor->SyncBrowserToObjects(Objects);
+			}
+		}
+
+		TSharedRef<SWidget> CreateMenu(const UEnum* InEnum)
+		{
+			// Empty list of commands.
+			const TSharedPtr<FUICommandList> Commands;
+
+			// Set the menu to automatically close when the user commits to a choice
+			FMenuBuilder MenuBuilder(true, Commands);
+			{
+				if (const UUserDefinedEnum* UserDefinedEnum = Cast<UUserDefinedEnum>(InEnum))
 				{
-					bReturnPassesFilter = bPassesDeveloperFilter && bPassesInternalFilter && IsEnumAllowed(InInitOptions, OriginalRootNodeEnum) && PassesFilter(InOriginalRootNode->GetEnumName(), InTextFilter);
+					MenuBuilder.AddMenuEntry(
+						LOCTEXT("EnumViewerMenuEditEnumAsset", "Edit Enum..."), 
+						LOCTEXT("EnumViewerMenuEditEnumAsset_Tooltip", "Open the enum in the asset editor."), 
+						FSlateIcon(), 
+						FUIAction(FExecuteAction::CreateStatic(&OpenAssetEditor, UserDefinedEnum))
+						);
+
+					MenuBuilder.AddMenuEntry(
+						LOCTEXT("EnumViewerMenuFindContent", "Find in Content Browser..."), 
+						LOCTEXT("EnumViewerMenuFindContent_Tooltip", "Find in Content Browser"), 
+						FSlateIcon(), 
+						FUIAction(FExecuteAction::CreateStatic(&FindInContentBrowser, InEnum))
+						);
 				}
 				else
 				{
-					if (bInShowUnloadedEnums)
-					{
-						bReturnPassesFilter = bPassesDeveloperFilter && bPassesInternalFilter && IsEnumAllowed_UnloadedEnum(InInitOptions, InOutRootNode->GetEnumPath()) && PassesFilter(InOriginalRootNode->GetEnumName(), InTextFilter);
-					}
-				}
-				InOutRootNode->PassedFilter(bReturnPassesFilter);
-
-				for (const TSharedPtr<FEnumViewerNodeData>& ChildNode : InOriginalRootNode->GetChildNodes())
-				{
-					TSharedRef<FEnumViewerNode> NewNode = MakeShared<FEnumViewerNode>(ChildNode.ToSharedRef(), InInitOptions.PropertyHandle, /*bPassedFilter*/false); // Whether we pass the filter is calculated in the recursive call
-
-					const bool bChildrenPassesFilter = AddChildren_Tree(InInitOptions, NewNode, ChildNode.ToSharedRef(), InTextFilter, bInShowUnloadedEnums, InAllowedDeveloperType, bInInternalEnums, InternalEnums, InternalPaths);
-					bReturnPassesFilter |= bChildrenPassesFilter;
-
-					if (bChildrenPassesFilter)
-					{
-						InOutRootNode->AddChild(NewNode);
-					}
-				}
-
-				return bReturnPassesFilter;
-			}
-
-			/**
-			 * Builds the enum tree.
-			 * @param InInitOptions						The enum viewer's options, holds the AllowedEnums and DisallowedEnums.
-			 * @param InOutRootNode						The node to root the tree to.
-			 * @param InTextFilter						Compiled text filter to apply.
-			 * @param bInShowUnloadedEnums			Filter option to not remove unloaded enums due to enum filter options.
-			 * @param InAllowedDeveloperType            Filter option for dealing with developer folders.
-			 * @param bInInternalEnums                Filter option for showing internal enums.
-			 * @param InternalEnums                   The enums that have been marked as Internal Only.
-			 * @param InternalPaths                     The paths that have been marked Internal Only.
-			 * @return A fully built tree.
-			 */
-			void GetEnumTree(
-				const FEnumViewerInitializationOptions& InInitOptions, 
-				TSharedPtr<FEnumViewerNode>& InOutRootNode,
-				const FTextFilterExpressionEvaluator& InTextFilter, 
-				const bool bInShowUnloadedEnums,
-				const EEnumViewerDeveloperType InAllowedDeveloperType = EEnumViewerDeveloperType::All,
-				const bool bInInternalEnums = true,
-				const TArray<const UEnum*>& InternalEnums = TArray<const UEnum*>(),
-				const TArray<FDirectoryPath>& InternalPaths = TArray<FDirectoryPath>()
-				)
-			{
-				const TSharedRef<FEnumViewerNodeData> EnumRootNode = FEnumHierarchy::Get().GetEnumRootNode();
-
-				// Make a dummy root node
-				InOutRootNode = MakeShared<FEnumViewerNode>();
-
-				AddChildren_Tree(InInitOptions, InOutRootNode.ToSharedRef(), EnumRootNode, InTextFilter, bInShowUnloadedEnums, InAllowedDeveloperType, bInInternalEnums, InternalEnums, InternalPaths);
-			}
-
-			/**
-			 * Recursive function to build the list, filtering out nodes based on the InitOptions and filter search terms.
-			 * @param InInitOptions						The enum viewer's options, holds the AllowedEnums and DisallowedEnums.
-			 * @param InOutNodeList						The list to add all the nodes to.
-			 * @param InOriginalRootNode				The original root node holding the data we produce a filtered node for.
-			 * @param InTextFilter						Compiled text filter to apply.
-			 * @param bInShowUnloadedEnums			Filter option to not remove unloaded enums due to enum filter options.
-			 * @param InAllowedDeveloperType            Filter option for dealing with developer folders.
-			 * @param bInInternalEnums                Filter option for showing internal enums.
-			 * @param InternalEnums                   The enums that have been marked as Internal Only.
-			 * @param InternalPaths                     The paths that have been marked Internal Only.
-			 * @return Returns true if the child passed the filter.
-			 */
-			void AddChildren_List(
-				const FEnumViewerInitializationOptions& InInitOptions, 
-				TArray<TSharedPtr<FEnumViewerNode>>& InOutNodeList,
-				const TSharedRef<FEnumViewerNodeData>& InOriginalRootNode, 
-				const FTextFilterExpressionEvaluator& InTextFilter,
-				const bool bInShowUnloadedEnums,
-				const EEnumViewerDeveloperType InAllowedDeveloperType,
-				const bool bInInternalEnums,
-				const TArray<const UEnum*>& InternalEnums, 
-				const TArray<FDirectoryPath>& InternalPaths
-				)
-			{
-				static const FString DeveloperPathWithSlash = FPackageName::FilenameToLongPackageName(FPaths::GameDevelopersDir());
-				static const FString UserDeveloperPathWithSlash = FPackageName::FilenameToLongPackageName(FPaths::GameUserDeveloperDir());
-
-				const UEnum* OriginalRootNodeEnum = InOriginalRootNode->GetEnum();
-
-				// Determine if we allow any developer folder enums, if so determine if this enum is in one of the allowed developer folders.
-				FString GeneratedEnumPathString = InOriginalRootNode->GetEnumPath().ToString();
-				bool bPassesDeveloperFilter = true;
-				if (InAllowedDeveloperType == EEnumViewerDeveloperType::None)
-				{
-					bPassesDeveloperFilter = !GeneratedEnumPathString.StartsWith(DeveloperPathWithSlash);
-				}
-				else if (InAllowedDeveloperType == EEnumViewerDeveloperType::CurrentUser)
-				{
-					if (GeneratedEnumPathString.StartsWith(DeveloperPathWithSlash))
-					{
-						bPassesDeveloperFilter = GeneratedEnumPathString.StartsWith(UserDeveloperPathWithSlash);
-					}
-				}
-
-				// The INI files declare enums and folders that are considered internal only. Does this enum match any of those patterns?
-				// INI path: /Script/EnumViewer.EnumViewerProjectSettings
-				bool bPassesInternalFilter = true;
-				if (!bInInternalEnums && InternalPaths.Num() > 0)
-				{
-					for (const FDirectoryPath& InternalPath : InternalPaths)
-					{
-						if (GeneratedEnumPathString.StartsWith(InternalPath.Path))
-						{
-							bPassesInternalFilter = false;
-							break;
-						}
-					}
-				}
-				if (!bInInternalEnums && InternalEnums.Num() > 0 && bPassesInternalFilter && OriginalRootNodeEnum)
-				{
-					for (const UEnum* InternalEnum : InternalEnums)
-					{
-						if (OriginalRootNodeEnum->IsChildOf(InternalEnum))
-						{
-							bPassesInternalFilter = false;
-							break;
-						}
-					}
-				}
-
-				// There are few options for filtering an unloaded enum, if it matches with this filter, it passes.
-				bool bPassedFilter = false;
-				if (OriginalRootNodeEnum)
-				{
-					bPassedFilter = bPassesDeveloperFilter && bPassesInternalFilter && IsEnumAllowed(InInitOptions, OriginalRootNodeEnum) && PassesFilter(InOriginalRootNode->GetEnumName(), InTextFilter);
-				}
-				else
-				{
-					if (bInShowUnloadedEnums)
-					{
-						bPassedFilter = bPassesDeveloperFilter && bPassesInternalFilter && IsEnumAllowed_UnloadedEnum(InInitOptions, InOriginalRootNode->GetEnumPath()) && PassesFilter(InOriginalRootNode->GetEnumName(), InTextFilter);
-					}
-				}
-
-				if (bPassedFilter)
-				{
-					InOutNodeList.Add(MakeShared<FEnumViewerNode>(InOriginalRootNode, InInitOptions.PropertyHandle, bPassedFilter));
-				}
-
-				for (const TSharedPtr<FEnumViewerNodeData>& ChildNode : InOriginalRootNode->GetChildNodes())
-				{
-					AddChildren_List(InInitOptions, InOutNodeList, ChildNode.ToSharedRef(), InTextFilter, bInShowUnloadedEnums, InAllowedDeveloperType, bInInternalEnums, InternalEnums, InternalPaths);
+					MenuBuilder.AddMenuEntry(
+						LOCTEXT("EnumViewerMenuOpenSourceCode", "Open Source Code..."), 
+						LOCTEXT("EnumViewerMenuOpenSourceCode_Tooltip", "Open the source file for this enum in the IDE."), 
+						FSlateIcon(), 
+						FUIAction(FExecuteAction::CreateStatic(&OpenEnumInIDE, InEnum))
+						);
 				}
 			}
 
-			/**
-			 * Builds the enum list.
-			 * @param InInitOptions						The enum viewer's options, holds the AllowedEnums and DisallowedEnums.
-			 * @param InOutNodeList						The list to add all the nodes to.
-			 * @param InTextFilter						Compiled text filter to apply.
-			 * @param bInShowUnloadedEnums			Filter option to not remove unloaded enums due to enum filter options.
-			 * @param InAllowedDeveloperType            Filter option for dealing with developer folders.
-			 * @param bInInternalEnums                Filter option for showing internal enums.
-			 * @param InternalEnums                   The enums that have been marked as Internal Only.
-			 * @param InternalPaths                     The paths that have been marked Internal Only.
-			 * @return A fully built list.
-			 */
-			void GetEnumList(
-				const FEnumViewerInitializationOptions& InInitOptions, 
-				TArray<TSharedPtr<FEnumViewerNode>>& InOutNodeList,
-				const FTextFilterExpressionEvaluator& InTextFilter, 
-				const bool bInShowUnloadedEnums,
-				const EEnumViewerDeveloperType InAllowedDeveloperType = EEnumViewerDeveloperType::All,
-				const bool bInInternalEnums = true,
-				const TArray<const UEnum*>& InternalEnums = TArray<const UEnum*>(), 
-				const TArray<FDirectoryPath>& InternalPaths = TArray<FDirectoryPath>()
-				)
-			{
-				const TSharedRef<FEnumViewerNodeData> EnumRootNode = FEnumHierarchy::Get().GetEnumRootNode();
-
-				// Always skip the dummy root, only adding its children
-				for (const TSharedPtr<FEnumViewerNodeData>& ChildNode : EnumRootNode->GetChildNodes())
-				{
-					AddChildren_List(InInitOptions, InOutNodeList, ChildNode.ToSharedRef(), InTextFilter, bInShowUnloadedEnums, InAllowedDeveloperType, bInInternalEnums, InternalEnums, InternalPaths);
-				}
-			}
-
-			/**
-			 * Opens an asset editor for a user defined enum.
-			 */
-			void OpenAssetEditor(const UUserDefinedEnum* InEnum)
-			{
-				if (InEnum)
-				{
-					GEditor->GetEditorSubsystem<UAssetEditorSubsystem>()->OpenEditorForAsset(const_cast<UUserDefinedEnum*>(InEnum));
-				}
-			}
-
-			/**
-			 * Opens a enum source file.
-			 */
-			void OpenEnumInIDE(const UEnum* InEnum)
-			{
-				FSourceCodeNavigation::NavigateToEnum(InEnum);
-			}
-
-			/**
-			 * Finds the enum in the content browser.
-			 */
-			void FindInContentBrowser(const UEnum* InEnum)
-			{
-				if (InEnum)
-				{
-					TArray<UObject*> Objects;
-					Objects.Add(const_cast<UEnum*>(InEnum));
-					GEditor->SyncBrowserToObjects(Objects);
-				}
-			}
-
-			TSharedRef<SWidget> CreateMenu(const UEnum* InEnum)
-			{
-				// Empty list of commands.
-				TSharedPtr<FUICommandList> Commands;
-
-				const bool bShouldCloseWindowAfterMenuSelection = true;	// Set the menu to automatically close when the user commits to a choice
-				FMenuBuilder MenuBuilder(bShouldCloseWindowAfterMenuSelection, Commands);
-				{
-					if (const UUserDefinedEnum* UserDefinedEnum = Cast<UUserDefinedEnum>(InEnum))
-					{
-						MenuBuilder.AddMenuEntry(
-							LOCTEXT("EnumViewerMenuEditEnumAsset", "Edit Enum..."), 
-							LOCTEXT("EnumViewerMenuEditEnumAsset_Tooltip", "Open the enum in the asset editor."), 
-							FSlateIcon(), 
-							FUIAction(FExecuteAction::CreateStatic(&EnumViewer::Helpers::OpenAssetEditor, UserDefinedEnum))
-							);
-
-						MenuBuilder.AddMenuEntry(
-							LOCTEXT("EnumViewerMenuFindContent", "Find in Content Browser..."), 
-							LOCTEXT("EnumViewerMenuFindContent_Tooltip", "Find in Content Browser"), 
-							FSlateIcon(), 
-							FUIAction(FExecuteAction::CreateStatic(&EnumViewer::Helpers::FindInContentBrowser, InEnum))
-							);
-					}
-					else
-					{
-						MenuBuilder.AddMenuEntry(
-							LOCTEXT("EnumViewerMenuOpenSourceCode", "Open Source Code..."), 
-							LOCTEXT("EnumViewerMenuOpenSourceCode_Tooltip", "Open the source file for this enum in the IDE."), 
-							FSlateIcon(), 
-							FUIAction(FExecuteAction::CreateStatic(&EnumViewer::Helpers::OpenEnumInIDE, InEnum))
-							);
-					}
-				}
-
-				return MenuBuilder.MakeWidget();
-			}
-		} // namespace Helpers
-	} // namespace EnumViewer
+			return MenuBuilder.MakeWidget();
+		}
+	}
 
 	/** Delegate used with the Enum Viewer in 'enum picking' mode. You'll bind a delegate when the enum viewer widget is created, which will be fired off when the selected enum is double clicked */
 	DECLARE_DELEGATE_OneParam(FOnEnumItemDoubleClickDelegate, TSharedPtr<FEnumViewerNode>);
@@ -619,11 +485,9 @@ namespace EnumViewer
 		SLATE_END_ARGS()
 
 		/**
-		 * Conenum the widget
-		 *
-		 * @param InArgs   A declaration from which to conenum the widget
+		 * Construct the widget
 		 */
-		void Conenum(const FArguments& InArgs, const TSharedRef<STableViewBase>& InOwnerTableView)
+		void Construct(const FArguments& InArgs, const TSharedRef<STableViewBase>& InOwnerTableView)
 		{
 			EnumDisplayName = InArgs._EnumDisplayName;
 			bIsInEnumViewer = InArgs._bIsInEnumViewer;
@@ -635,7 +499,7 @@ namespace EnumViewer
 			{
 				TSharedPtr<SToolTip> ToolTip;
 
-				TSharedPtr<IPropertyHandle> PropertyHandle = AssociatedNode->GetPropertyHandle();
+				const TSharedPtr<IPropertyHandle> PropertyHandle = AssociatedNode->GetPropertyHandle();
 				if (PropertyHandle && AssociatedNode->IsRestricted())
 				{
 					FText RestrictionToolTip;
@@ -693,16 +557,16 @@ namespace EnumViewer
 
 			UE_LOG(LogEditorEnumViewer, VeryVerbose, TEXT("STRUCT [%s]"), *EnumDisplayName.ToString());
 
-			STableRow<TSharedPtr<FString>>::ConenumInternal(
+			ConstructInternal(
 				STableRow::FArguments()
 				.ShowSelection(true)
 				.OnDragDetected(InArgs._OnDragDetected),
 				InOwnerTableView
-				);
+			);
 		}
 
 	private:
-		FReply OnMouseButtonDoubleClick(const FGeometry& InMyGeometry, const FPointerEvent& InMouseEvent)
+		virtual FReply OnMouseButtonDoubleClick(const FGeometry& InMyGeometry, const FPointerEvent& InMouseEvent) override
 		{
 			// If in a Enum Viewer and it has not been loaded, load the enum when double-left clicking.
 			if (bIsInEnumViewer)
@@ -773,10 +637,10 @@ namespace EnumViewer
 		FText EnumDisplayName;
 
 		/** true if in a Enum Viewer (as opposed to a Enum Picker). */
-		bool bIsInEnumViewer;
+		bool bIsInEnumViewer = false;
 
 		/** true if dynamic enum loading is permitted. */
-		bool bDynamicEnumLoading;
+		bool bDynamicEnumLoading = false;
 
 		/** The text color for this item. */
 		FSlateColor TextColor;
@@ -791,10 +655,8 @@ namespace EnumViewer
 	FEnumHierarchy::FEnumHierarchy()
 	{
 		// Register with the Asset Registry to be informed when it is done loading up files.
-		FAssetRegistryModule& AssetRegistryModule = FModuleManager::GetModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
+		const FAssetRegistryModule& AssetRegistryModule = FModuleManager::GetModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
 		AssetRegistryModule.Get().OnFilesLoaded().AddRaw(this, &FEnumHierarchy::DirtyEnumHierarchy);
-		AssetRegistryModule.Get().OnAssetAdded().AddRaw(this, &FEnumHierarchy::AddAsset);
-		AssetRegistryModule.Get().OnAssetRemoved().AddRaw(this, &FEnumHierarchy::RemoveAsset);
 
 		// Register to have Populate called when doing a Hot Reload.
 		IHotReloadInterface& HotReloadSupport = FModuleManager::LoadModuleChecked<IHotReloadInterface>("HotReload");
@@ -810,7 +672,7 @@ namespace EnumViewer
 		// Unregister with the Asset Registry to be informed when it is done loading up files.
 		if (FModuleManager::Get().IsModuleLoaded(TEXT("AssetRegistry")))
 		{
-			FAssetRegistryModule& AssetRegistryModule = FModuleManager::GetModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
+			const FAssetRegistryModule& AssetRegistryModule = FModuleManager::GetModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
 			AssetRegistryModule.Get().OnFilesLoaded().RemoveAll(this);
 			AssetRegistryModule.Get().OnAssetAdded().RemoveAll(this);
 			AssetRegistryModule.Get().OnAssetRemoved().RemoveAll(this);
@@ -873,63 +735,10 @@ namespace EnumViewer
 			TMap<const UEnum*, TSharedPtr<FEnumViewerNodeData>> DataNodes;
 			DataNodes.Add(nullptr, EnumRootNode);
 
-			TSet<const UEnum*> Visited;
-
 			// Go through all of the enums and see if they should be added to the list.
-			for (TObjectIterator<UEnum> EnumIt; EnumIt; ++EnumIt)
+			for (const auto* Enum : TObjectRange<UEnum>())
 			{
-				const UEnum* CurrentEnum = *EnumIt;
-				if (Visited.Contains(CurrentEnum))
-				{
-					continue;
-				}
-
-				while (CurrentEnum)
-				{
-					const UEnum* SuperEnum = Cast<UEnum>(CurrentEnum->GetSuperEnum());
-
-					TSharedPtr<FEnumViewerNodeData>& ParentEntryRef = DataNodes.FindOrAdd(SuperEnum);
-					if (!ParentEntryRef.IsValid())
-					{
-						check(SuperEnum); // The null entry should have been created above
-						ParentEntryRef = MakeShared<FEnumViewerNodeData>(SuperEnum);
-					}
-
-					// Need to have a pointer in-case the ref moves to avoid an extra look up in the map
-					TSharedPtr<FEnumViewerNodeData> ParentEntry = ParentEntryRef;
-
-					TSharedPtr<FEnumViewerNodeData>& MyEntryRef = DataNodes.FindOrAdd(CurrentEnum);
-					if (!MyEntryRef.IsValid())
-					{
-						MyEntryRef = MakeShared<FEnumViewerNodeData>(CurrentEnum);
-					}
-
-					// Need to re-acquire the reference in the enum as it may have been invalidated from a re-size
-					if (!Visited.Contains(CurrentEnum))
-					{
-						ParentEntry->AddChild(MyEntryRef.ToSharedRef());
-						Visited.Add(CurrentEnum);
-					}
-
-					CurrentEnum = SuperEnum;
-				}
-			}
-		}
-
-		// Add any enum assets directly under the root (since they don't support inheritance)
-		{
-			FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
-
-			FARFilter Filter;
-			Filter.ClassNames.Add(UUserDefinedEnum::StaticClass()->GetFName());
-			Filter.bRecursiveClasses = true;
-
-			TArray<FAssetData> UserDefinedEnumsList;
-			AssetRegistryModule.Get().GetAssets(Filter, UserDefinedEnumsList);
-
-			for (const FAssetData& UserDefinedEnumData : UserDefinedEnumsList)
-			{
-				EnumRootNode->AddChild(MakeShared<FEnumViewerNodeData>(UserDefinedEnumData));
+				DataNodes.Add(Enum);
 			}
 		}
 
@@ -944,68 +753,10 @@ namespace EnumViewer
 		{
 			return InRootNode;
 		}
-
-		// Search the children recursively, one of them might have the node
-		for (const TSharedPtr<FEnumViewerNodeData>& ChildNode : InRootNode->GetChildNodes())
-		{
-			// Check the child, then check the return to see if it is valid. If it is valid, end the recursion.
-			TSharedPtr<FEnumViewerNodeData> ReturnNode = FindNodeByEnumPath(ChildNode.ToSharedRef(), InEnumPath);
-			if (ReturnNode)
-			{
-				return ReturnNode;
-			}
-		}
-
+		
 		return nullptr;
 	}
-
-	bool FEnumHierarchy::FindAndRemoveNodeByEnumPath(const TSharedRef<FEnumViewerNodeData>& InRootNode, const FName InEnumPath)
-	{
-		// Check if the current node contains a child of enum path that is being searched for
-		if (InRootNode->RemoveChild(InEnumPath))
-		{
-			return true;
-		}
-
-		// Search the children recursively, one of them might have the node
-		for (const TSharedPtr<FEnumViewerNodeData>& ChildNode : InRootNode->GetChildNodes())
-		{
-			// Check the child, then check the return to see if it is valid. If it is valid, end the recursion.
-			if (FindAndRemoveNodeByEnumPath(ChildNode.ToSharedRef(), InEnumPath))
-			{
-				return true;
-			}
-		}
-
-		return false;
-	}
-
-	void FEnumHierarchy::AddAsset(const FAssetData& InAddedAssetData)
-	{
-		FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
-		if (!AssetRegistryModule.Get().IsLoadingAssets())
-		{
-			// Make sure that the node does not already exist. There is a bit of double adding going on at times and this prevents it.
-			if (!FindNodeByEnumPath(InAddedAssetData.ObjectPath))
-			{
-				// User defined enums are always root level enums
-				EnumRootNode->AddChild(MakeShared<FEnumViewerNodeData>(InAddedAssetData));
-
-				// All Viewers must repopulate.
-				PopulateEnumViewerDelegate.Broadcast();
-			}
-		}
-	}
-
-	void FEnumHierarchy::RemoveAsset(const FAssetData& InRemovedAssetData)
-	{
-		if (FindAndRemoveNodeByEnumPath(InRemovedAssetData.ObjectPath))
-		{
-			// All viewers must refresh.
-			PopulateEnumViewerDelegate.Broadcast();
-		}
-	}
-
+	
 	void FEnumHierarchy::OnHotReload(bool bWasTriggeredAutomatically)
 	{
 		DirtyEnumHierarchy();
@@ -1020,7 +771,7 @@ namespace EnumViewer
 	}
 
 	BEGIN_SLATE_FUNCTION_BUILD_OPTIMIZATION
-	void SEnumViewer::Conenum(const FArguments& InArgs, const FEnumViewerInitializationOptions& InInitOptions)
+	void SEnumViewer::Construct(const FArguments& InArgs, const FEnumViewerInitializationOptions& InInitOptions)
 	{
 		bNeedsRefresh = true;
 		NumEnums = 0;
@@ -1041,29 +792,15 @@ namespace EnumViewer
 
 		bEnableEnumDynamicLoading = InInitOptions.bEnableEnumDynamicLoading;
 
-		EVisibility HeaderVisibility = (this->InitOptions.Mode == EEnumViewerMode::EnumBrowsing) ? EVisibility::Visible : EVisibility::Collapsed;
+		const EVisibility HeaderVisibility = (this->InitOptions.Mode == EEnumViewerMode::EnumBrowsing) ? EVisibility::Visible : EVisibility::Collapsed;
 
 		// Set these values to the user specified settings.
 		bShowUnloadedEnums = InitOptions.bShowUnloadedEnums;
-		bool bHasTitle = InitOptions.ViewerTitleString.IsEmpty() == false;
-
-		// If set to default, decide what display mode to use.
-		if (InitOptions.DisplayMode == EEnumViewerDisplayMode::DefaultView)
-		{
-			// By default the Browser uses the tree view, the Picker the list. The option is available to users to force to another display mode when creating the Enum Browser/Picker.
-			if (InitOptions.Mode == EEnumViewerMode::EnumBrowsing)
-			{
-				InitOptions.DisplayMode = EEnumViewerDisplayMode::TreeView;
-			}
-			else
-			{
-				InitOptions.DisplayMode = EEnumViewerDisplayMode::ListView;
-			}
-		}
+		const bool bHasTitle = InitOptions.ViewerTitleString.IsEmpty() == false;
 
 		// Create the asset discovery indicator
 		FEditorWidgetsModule& EditorWidgetsModule = FModuleManager::LoadModuleChecked<FEditorWidgetsModule>("EditorWidgets");
-		TSharedRef<SWidget> AssetDiscoveryIndicator = EditorWidgetsModule.CreateAssetDiscoveryIndicator(EAssetDiscoveryIndicatorScaleMode::Scale_Vertical);
+		const TSharedRef<SWidget> AssetDiscoveryIndicator = EditorWidgetsModule.CreateAssetDiscoveryIndicator(EAssetDiscoveryIndicatorScaleMode::Scale_Vertical);
 		FOnContextMenuOpening OnContextMenuOpening;
 		if (InitOptions.Mode == EEnumViewerMode::EnumBrowsing)
 		{
@@ -1091,8 +828,8 @@ namespace EnumViewer
 
 		TSharedRef<SListView<TSharedPtr<FEnumViewerNode>>> EnumListView = EnumList.ToSharedRef();
 
-		// Holds the bulk of the enum viewer's sub-widgets, to be added to the widget after conenumion
-		TSharedPtr<SWidget> EnumViewerContent =
+		// Holds the bulk of the enum viewer's sub-widgets, to be added to the widget after construction
+		const TSharedPtr<SWidget> EnumViewerContent =
 			SNew(SBox)
 			.MaxDesiredHeight(800.0f)
 			[
@@ -1267,7 +1004,7 @@ namespace EnumViewer
 	void SEnumViewer::OnEnumViewerSelectionChanged(TSharedPtr<FEnumViewerNode> Item, ESelectInfo::Type SelectInfo)
 	{
 		// Do not act on selection change when it is for navigation
-		if (SelectInfo == ESelectInfo::OnNavigation && InitOptions.DisplayMode == EEnumViewerDisplayMode::ListView)
+		if (SelectInfo == ESelectInfo::OnNavigation)
 		{
 			return;
 		}
@@ -1308,17 +1045,8 @@ namespace EnumViewer
 
 	TSharedPtr<SWidget> SEnumViewer::BuildMenuWidget()
 	{
-		TArray<TSharedPtr<FEnumViewerNode>> SelectedList;
-
 		// Based upon which mode the viewer is in, pull the selected item.
-		if (InitOptions.DisplayMode == EEnumViewerDisplayMode::TreeView)
-		{
-			SelectedList = EnumTree->GetSelectedItems();
-		}
-		else
-		{
-			SelectedList = EnumList->GetSelectedItems();
-		}
+		TArray<TSharedPtr<FEnumViewerNode>> SelectedList = EnumList->GetSelectedItems();
 
 		// If there is no selected item, return a null widget.
 		if (SelectedList.Num() == 0)
@@ -1343,16 +1071,14 @@ namespace EnumViewer
 	TSharedRef<ITableRow> SEnumViewer::OnGenerateRowForEnumViewer(TSharedPtr<FEnumViewerNode> Item, const TSharedRef<STableViewBase>& OwnerTable)
 	{
 		// If the item was accepted by the filter, leave it bright, otherwise dim it.
-		float AlphaValue = Item->PassedFilter() ? 1.0f : 0.5f;
 		TSharedRef<SEnumItem> ReturnRow = SNew(SEnumItem, OwnerTable)
 			.EnumDisplayName(Item->GetEnumDisplayName(InitOptions.NameTypeToDisplay))
 			.HighlightText(SearchBox->GetText())
-			.TextColor(FLinearColor(1.0f, 1.0f, 1.0f, AlphaValue))
+			.TextColor(FLinearColor(1.0f, 1.0f, 1.0f, (Item->PassedFilter() ? 1.0f : 0.5f)))
 			.AssociatedNode(Item)
 			.bIsInEnumViewer(InitOptions.Mode == EEnumViewerMode::EnumBrowsing)
 			.bDynamicEnumLoading(bEnableEnumDynamicLoading)
-			.OnDragDetected(this, &SEnumViewer::OnDragDetected)
-			.OnEnumItemDoubleClicked(FOnEnumItemDoubleClickDelegate::CreateSP(this, &SEnumViewer::ToggleExpansionState_Helper));
+			.OnDragDetected(this, &SEnumViewer::OnDragDetected);
 
 		// Expand the item if needed.
 		if (!bPendingSetExpansionStates)
@@ -1367,16 +1093,12 @@ namespace EnumViewer
 		return ReturnRow;
 	}
 
-	const TArray<TSharedPtr<FEnumViewerNode>> SEnumViewer::GetSelectedItems() const
+	TArray<TSharedPtr<FEnumViewerNode>> SEnumViewer::GetSelectedItems() const
 	{
-		if (InitOptions.DisplayMode == EEnumViewerDisplayMode::ListView)
-		{
-			return EnumList->GetSelectedItems();
-		}
-		return EnumTree->GetSelectedItems();
+		return EnumList->GetSelectedItems();
 	}
 
-	const int SEnumViewer::GetNumItems() const
+	int32 SEnumViewer::GetNumItems() const
 	{
 		return NumEnums;
 	}
@@ -1394,10 +1116,7 @@ namespace EnumViewer
 		// Get all menu extenders for this context menu from the content browser module
 
 		FMenuBuilder MenuBuilder(/*bInShouldCloseWindowAfterMenuSelection=*/true, nullptr, nullptr, /*bCloseSelfOnly=*/ true);
-
-		MenuBuilder.AddMenuEntry(LOCTEXT("ExpandAll", "Expand All"), LOCTEXT("ExpandAll_Tooltip", "Expands the entire tree"), FSlateIcon(), FUIAction(FExecuteAction::CreateSP(this, &SEnumViewer::SetAllExpansionStates, bool(true))), NAME_None, EUserInterfaceActionType::Button);
-		MenuBuilder.AddMenuEntry(LOCTEXT("CollapseAll", "Collapse All"), LOCTEXT("CollapseAll_Tooltip", "Collapses the entire tree"), FSlateIcon(), FUIAction(FExecuteAction::CreateSP(this, &SEnumViewer::SetAllExpansionStates, bool(false))), NAME_None, EUserInterfaceActionType::Button);
-
+		
 		MenuBuilder.BeginSection("Filters", LOCTEXT("EnumViewerFiltersHeading", "Enum Filters"));
 		{
 			MenuBuilder.AddMenuEntry(
@@ -1459,16 +1178,14 @@ namespace EnumViewer
 		MenuBuilder.EndSection();
 
 		return MenuBuilder.MakeWidget();
-
-		return MenuBuilder.MakeWidget();
 	}
 
 	void SEnumViewer::SetCurrentDeveloperViewType(EEnumViewerDeveloperType NewType)
 	{
-		if (ensure((int)NewType < (int)EEnumViewerDeveloperType::Max) && NewType != GetDefault<UEnumViewerSettings>()->DeveloperFolderType)
+		if (ensure(NewType < EEnumViewerDeveloperType::Max) && NewType != UEnumViewerSettings::Get().DeveloperFolderType)
 		{
-			GetMutableDefault<UEnumViewerSettings>()->DeveloperFolderType = NewType;
-			GetMutableDefault<UEnumViewerSettings>()->PostEditChange();
+			UEnumViewerSettings::FEnumViewerModifier Modifier;
+			Modifier.SetDeveloperFolderType(NewType);
 		}
 	}
 
@@ -1493,7 +1210,7 @@ namespace EnumViewer
 		{
 			return;
 		}
-		Enums = GetDefault<UEnumViewerProjectSettings>()->InternalOnlyEnums;
+		Enums = UEnumViewerSettings::Get().InternalOnlyEnums;
 	}
 
 	void SEnumViewer::GetInternalOnlyPaths(TArray<FDirectoryPath>& Paths)
@@ -1502,7 +1219,7 @@ namespace EnumViewer
 		{
 			return;
 		}
-		Paths = GetDefault<UEnumViewerProjectSettings>()->InternalOnlyPaths;
+		Paths = UEnumViewerSettings::Get().InternalOnlyPaths;
 	}
 
 	FText SEnumViewer::GetEnumCountText() const
@@ -1517,16 +1234,7 @@ namespace EnumViewer
 			return FText::Format(LOCTEXT("EnumCountLabelPlusSelection", "{0} {0}|plural(one=item,other=items) ({1} selected)"), NumEnums, NumSelectedEnums);
 		}
 	}
-
-	void SEnumViewer::ExpandRootNodes()
-	{
-		for (int32 NodeIdx = 0; NodeIdx < RootTreeItems.Num(); ++NodeIdx)
-		{
-			ExpansionStateMap.Add(RootTreeItems[NodeIdx]->GetEnumPath(), true);
-			EnumTree->SetItemExpansion(RootTreeItems[NodeIdx], true);
-		}
-	}
-
+	
 	FReply SEnumViewer::OnDragDetected(const FGeometry& Geometry, const FPointerEvent& PointerEvent)
 	{
 		if (InitOptions.Mode == EEnumViewerMode::EnumBrowsing)
@@ -1535,9 +1243,9 @@ namespace EnumViewer
 
 			if (SelectedItems.Num() > 0 && SelectedItems[0].IsValid())
 			{
-				TSharedRef<FEnumViewerNode> Item = SelectedItems[0].ToSharedRef();
+				const TSharedRef<FEnumViewerNode> Item = SelectedItems[0].ToSharedRef();
 
-				FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
+				const FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
 
 				// Spawn a loaded user defined enum just like any other asset from the Content Browser.
 				const FAssetData AssetData = AssetRegistryModule.Get().GetAssetByObjectPath(Item->GetEnumPath());
@@ -1589,126 +1297,11 @@ namespace EnumViewer
 			}
 		}
 	}
-
-	void SEnumViewer::SetAllExpansionStates(bool bInExpansionState)
-	{
-		// Go through all the items in the root of the tree and recursively visit their children to set every item in the tree.
-		for (int32 ChildIndex = 0; ChildIndex < RootTreeItems.Num(); ChildIndex++)
-		{
-			SetAllExpansionStates_Helper(RootTreeItems[ChildIndex], bInExpansionState);
-		}
-	}
-
-	void SEnumViewer::SetAllExpansionStates_Helper(TSharedPtr<FEnumViewerNode> InNode, bool bInExpansionState)
-	{
-		EnumTree->SetItemExpansion(InNode, bInExpansionState);
-
-		// Recursively go through the children.
-		for (const TSharedPtr<FEnumViewerNode>& ChildNode : InNode->GetChildNodes())
-		{
-			SetAllExpansionStates_Helper(ChildNode, bInExpansionState);
-		}
-	}
-
-	void SEnumViewer::ToggleExpansionState_Helper(TSharedPtr<FEnumViewerNode> InNode)
-	{
-		const bool bExpanded = EnumTree->IsItemExpanded(InNode);
-		EnumTree->SetItemExpansion(InNode, !bExpanded);
-	}
-
-	bool SEnumViewer::ExpandFilteredInNodes(TSharedPtr<FEnumViewerNode> InNode)
-	{
-		bool bShouldExpand = InNode->PassedFilter();
-
-		for (const TSharedPtr<FEnumViewerNode>& ChildNode : InNode->GetChildNodes())
-		{
-			bShouldExpand |= ExpandFilteredInNodes(ChildNode);
-		}
-
-		if (bShouldExpand)
-		{
-			EnumTree->SetItemExpansion(InNode, true);
-		}
-
-		return bShouldExpand;
-	}
-
-	void SEnumViewer::MapExpansionStatesInTree(TSharedPtr<FEnumViewerNode> InItem)
-	{
-		ExpansionStateMap.Add(InItem->GetEnumPath(), EnumTree->IsItemExpanded(InItem));
-
-		// Map out all the children, this will be done recursively.
-		for (const TSharedPtr<FEnumViewerNode>& ChildItem : InItem->GetChildNodes())
-		{
-			MapExpansionStatesInTree(ChildItem);
-		}
-	}
-
-	void SEnumViewer::SetExpansionStatesInTree(TSharedPtr<FEnumViewerNode> InItem)
-	{
-		const bool* bIsExpanded = ExpansionStateMap.Find(InItem->GetEnumPath());
-		if (bIsExpanded)
-		{
-			EnumTree->SetItemExpansion(InItem, *bIsExpanded);
-
-			// No reason to set expansion states if the parent is not expanded, it does not seem to do anything.
-			if (*bIsExpanded)
-			{
-				for (const TSharedPtr<FEnumViewerNode>& ChildItem : InItem->GetChildNodes())
-				{
-					SetExpansionStatesInTree(ChildItem);
-				}
-			}
-		}
-		else
-		{
-			// Default to no expansion.
-			EnumTree->SetItemExpansion(InItem, false);
-		}
-	}
-
-	int32 SEnumViewer::CountTreeItems(FEnumViewerNode* Node)
-	{
-		if (Node == nullptr)
-		{
-			return 0;
-		}
-
-		int32 Count = 1;
-		for (const TSharedPtr<FEnumViewerNode>& ChildNode : Node->GetChildNodes())
-		{
-			Count += CountTreeItems(ChildNode.Get());
-		}
-		return Count;
-	}
-
+	
 	void SEnumViewer::Populate()
 	{
 		bPendingSetExpansionStates = false;
-
-		// If showing a enum tree, we may need to save expansion states.
-		if (InitOptions.DisplayMode == EEnumViewerDisplayMode::TreeView)
-		{
-			if (bSaveExpansionStates)
-			{
-				for (const TSharedPtr<FEnumViewerNode>& ChildNode : RootTreeItems)
-				{
-					// Check if the item is actually expanded or if it's only expanded because it is root level.
-					bool* bIsExpanded = ExpansionStateMap.Find(ChildNode->GetEnumPath());
-					if ((bIsExpanded && !*bIsExpanded) || !bIsExpanded)
-					{
-						EnumTree->SetItemExpansion(ChildNode, false);
-					}
-
-					// Recursively map out the expansion state of the tree-node.
-					MapExpansionStatesInTree(ChildNode);
-				}
-			}
-
-			// This is set to false before the call to populate when it is not desired.
-			bSaveExpansionStates = true;
-		}
-
+		
 		// Empty the tree out so it can be redone.
 		RootTreeItems.Empty();
 
@@ -1737,97 +1330,29 @@ namespace EnumViewer
 				}
 			}
 		}
+		
+		// Get the enum list, passing in certain filter options.
+		EnumViewer::Helpers::GetEnumList(InitOptions, RootTreeItems, *TextFilterPtr, bShowUnloadedEnums, GetCurrentDeveloperViewType(), ShowingInternalEnums, InternalEnums, InternalPaths);
 
-		// Based on if the list or tree is visible we create what will be displayed differently.
-		if (InitOptions.DisplayMode == EEnumViewerDisplayMode::TreeView)
+		// Sort the list alphabetically.
+		RootTreeItems.Sort(&FEnumViewerNode::SortPredicate);
+
+		// Only display this option if the user wants it and in Picker Mode.
+		if (InitOptions.bShowNoneOption && InitOptions.Mode == EEnumViewerMode::EnumPicker)
 		{
-			// The root node for the tree, will be dummy instance which we will skip.
-			TSharedPtr<FEnumViewerNode> RootNode;
-
-			// Get the enum tree, passing in certain filter options.
-			EnumViewer::Helpers::GetEnumTree(InitOptions, RootNode, *TextFilterPtr, bShowUnloadedEnums, GetCurrentDeveloperViewType(), ShowingInternalEnums, InternalEnums, InternalPaths);
-
-			// Sort the tree
-			RootNode->SortChildrenRecursive();
-
-			// Check if we will restore expansion states, we will not if there is filtering happening.
-			const bool bRestoreExpansionState = TextFilterPtr->GetFilterType() == ETextFilterExpressionType::Empty;
-
-			// Add all the children of the dummy root.
-			for (const TSharedPtr<FEnumViewerNode>& ChildItem : RootNode->GetChildNodes())
-			{
-				RootTreeItems.Add(ChildItem);
-				if (bRestoreExpansionState)
-				{
-					SetExpansionStatesInTree(ChildItem);
-				}
-
-				// Expand any items that pass the filter.
-				if (TextFilterPtr->GetFilterType() != ETextFilterExpressionType::Empty)
-				{
-					ExpandFilteredInNodes(ChildItem);
-				}
-			}
-
-			// Only display this option if the user wants it and in Picker Mode.
-			if (InitOptions.bShowNoneOption && InitOptions.Mode == EEnumViewerMode::EnumPicker)
-			{
-				// @todo - It would seem smart to add this in before the other items, since it needs to be on top. However, that causes strange issues with saving/restoring expansion states. 
-				// This is likely not very efficient since the list can have hundreds and even thousands of items.
-				RootTreeItems.Insert(MakeShared<FEnumViewerNode>(), 0);
-			}
-
-			NumEnums = 0;
-			for (const TSharedPtr<FEnumViewerNode>& ChildNode : RootTreeItems)
-			{
-				NumEnums += CountTreeItems(ChildNode.Get());
-			}
-
-			// Now that new items are in the tree, we need to request a refresh.
-			EnumTree->RequestTreeRefresh();
+			// @todo - It would seem smart to add this in before the other items, since it needs to be on top. However, that causes strange issues with saving/restoring expansion states. 
+			// This is likely not very efficient since the list can have hundreds and even thousands of items.
+			RootTreeItems.Insert(MakeShared<FEnumViewerNode>(), 0);
 		}
-		else
-		{
-			// Get the enum list, passing in certain filter options.
-			EnumViewer::Helpers::GetEnumList(InitOptions, RootTreeItems, *TextFilterPtr, bShowUnloadedEnums, GetCurrentDeveloperViewType(), ShowingInternalEnums, InternalEnums, InternalPaths);
 
-			// Sort the list alphabetically.
-			RootTreeItems.Sort(&FEnumViewerNode::SortPredicate);
+		NumEnums = 0;
 
-			// Only display this option if the user wants it and in Picker Mode.
-			if (InitOptions.bShowNoneOption && InitOptions.Mode == EEnumViewerMode::EnumPicker)
-			{
-				// @todo - It would seem smart to add this in before the other items, since it needs to be on top. However, that causes strange issues with saving/restoring expansion states. 
-				// This is likely not very efficient since the list can have hundreds and even thousands of items.
-				RootTreeItems.Insert(MakeShared<FEnumViewerNode>(), 0);
-			}
-
-			NumEnums = 0;
-			for (const TSharedPtr<FEnumViewerNode>& ChildNode : RootTreeItems)
-			{
-				NumEnums += CountTreeItems(ChildNode.Get());
-			}
-
-			// Now that new items are in the list, we need to request a refresh.
-			EnumList->RequestListRefresh();
-		}
+		// Now that new items are in the list, we need to request a refresh.
+		EnumList->RequestListRefresh();
 	}
-
-	FReply SEnumViewer::OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent)
-	{
-		// Forward key down to enum tree
-		return EnumTree->OnKeyDown(MyGeometry, InKeyEvent);
-	}
-
+	
 	FReply SEnumViewer::OnFocusReceived(const FGeometry& MyGeometry, const FFocusEvent& InFocusEvent)
 	{
-		if (RootTreeItems.Num() > 0)
-		{
-			EnumTree->SetItemSelection(RootTreeItems[0], true, ESelectInfo::OnMouseClick);
-			EnumTree->SetItemExpansion(RootTreeItems[0], true);
-			OnEnumViewerSelectionChanged(RootTreeItems[0], ESelectInfo::OnMouseClick);
-		}
-
 		FSlateApplication::Get().SetKeyboardFocus(SearchBox.ToSharedRef(), EFocusCause::SetDirectly);
 
 		return FReply::Unhandled();
@@ -1866,17 +1391,11 @@ namespace EnumViewer
 		{
 			bNeedsRefresh = false;
 			Populate();
-
-			if (InitOptions.bExpandRootNodes)
-			{
-				ExpandRootNodes();
-			}
 		}
 
 		if (bPendingSetExpansionStates)
 		{
 			check(RootTreeItems.Num() > 0);
-			SetExpansionStatesInTree(RootTreeItems[0]);
 			bPendingSetExpansionStates = false;
 		}
 	}
@@ -1899,7 +1418,7 @@ namespace EnumViewer
 	void SEnumViewer::ToggleShowInternalEnums()
 	{
 		check(IsToggleShowInternalEnumsAllowed());
-		GetMutableDefault<UEnumViewerSettings>()->DisplayInternalEnums = !GetDefault<UEnumViewerSettings>()->DisplayInternalEnums;
+		GetMutableDefault<UEnumViewerSettings>()->bDisplayInternalEnums = !GetDefault<UEnumViewerSettings>()->bDisplayInternalEnums;
 		GetMutableDefault<UEnumViewerSettings>()->PostEditChange();
 	}
 
@@ -1914,7 +1433,7 @@ namespace EnumViewer
 		{
 			return true;
 		}
-		return IsToggleShowInternalEnumsAllowed() && GetDefault<UEnumViewerSettings>()->DisplayInternalEnums;
+		return IsToggleShowInternalEnumsAllowed() && GetDefault<UEnumViewerSettings>()->bDisplayInternalEnums;
 	}
 }
 

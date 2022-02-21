@@ -21,8 +21,8 @@ namespace EnumViewer
 			TabId,
 			FOnSpawnTab::CreateStatic(&FEnumPickerTab::HandleRegisterTabSpawner)
 		)
-		.SetDisplayName(LOCTEXT("EnumViewerApp", "TabTitle", "Enum Viewer"))
-		.SetTooltipText(LOCTEXT("EnumViewerApp", "TooltipText", "Displays all enums that exist within this project."))
+		.SetDisplayName(LOCTEXT("TabTitle", "Enum Viewer"))
+		.SetTooltipText(LOCTEXT("TooltipText", "Displays all enums that exist within this project."))
 		.SetGroup(WorkspaceMenu::GetMenuStructure().GetDeveloperToolsMiscCategory())
 		.SetIcon(FSlateIcon(FEditorStyle::GetStyleSetName(), "ClassViewer.TabIcon"));
 	}
@@ -40,8 +40,7 @@ namespace EnumViewer
 	{
 		FEnumViewerInitializationOptions InitOptions;
 		InitOptions.Mode = EEnumViewerMode::EnumBrowsing;
-		InitOptions.DisplayMode = EEnumViewerDisplayMode::TreeView;
-
+		
 		return SNew(SDockTab)
 			.TabRole(ETabRole::NomadTab)
 			[

@@ -19,11 +19,12 @@ class FMenuBuilder;
 class FTextFilterExpressionEvaluator;
 class UBlueprint;
 class SComboButton;
-class FEnumViewerNode;
 class FTextFilterExpressionEvaluator;
 
 namespace EnumViewer
 {
+	class FEnumViewerNode;
+	
 	class SEnumViewer : public SCompoundWidget
 	{
 	public:
@@ -36,24 +37,17 @@ namespace EnumViewer
 		SLATE_END_ARGS()
 
 		/**
-		 * Conenum the widget
-		 *
-		 * @param	InArgs			A declaration from which to conenum the widget
-		 * @param	InitOptions		Programmer-driven initialization options for this widget
+		 * Construct the widget
 		 */
-		void Conenum(const FArguments& InArgs, const FEnumViewerInitializationOptions& InInitOptions);
+		void Construct(const FArguments& InArgs, const FEnumViewerInitializationOptions& InInitOptions);
 
 		/** Gets the widget contents of the app */
 		virtual TSharedRef<SWidget> GetContent();
 
 		virtual ~SEnumViewer() override;
-
-		/** Empty the selection set. */
-		virtual void ClearSelection();
-
+		
 		/** SWidget interface */
 		virtual void Tick(const FGeometry& AllottedGeometry, const double InCurrentTime, const float InDeltaTime) override;
-		virtual FReply OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent) override;
 		virtual FReply OnFocusReceived(const FGeometry& MyGeometry, const FFocusEvent& InFocusEvent) override;
 		virtual bool SupportsKeyboardFocus() const override;
 
@@ -64,18 +58,11 @@ namespace EnumViewer
 		static void DestroyEnumHierarchy();
 
 	private:
-		/** Retrieves the children for the input node.
-		 *	@param InParent				The parent node to retrieve the children from.
-		 *	@param OutChildren			List of children for the parent node.
-		 *
-		 */
-		void OnGetChildrenForEnumViewerTree(TSharedPtr<FEnumViewerNode> InParent, TArray<TSharedPtr<FEnumViewerNode>>& OutChildren);
-
 		/** Creates the row widget when called by Slate when an item appears on the tree. */
 		TSharedRef<ITableRow> OnGenerateRowForEnumViewer(TSharedPtr<FEnumViewerNode> Item, const TSharedRef<STableViewBase>& OwnerTable);
 
 		/** Invoked when the user attempts to drag an item out of the enum browser */
-		FReply OnDragDetected(const FGeometry& Geometry, const FPointerEvent& PointerEvent) override;
+		virtual FReply OnDragDetected(const FGeometry& Geometry, const FPointerEvent& PointerEvent) override;
 
 		/** Called by Slate when the filter box changes text. */
 		void OnFilterTextChanged(const FText& InFilterText);
@@ -89,47 +76,8 @@ namespace EnumViewer
 		/** Called by Slate when an item is expanded/collapsed from the tree/list. */
 		void OnEnumViewerExpansionChanged(TSharedPtr<FEnumViewerNode> Item, bool bExpanded);
 
-		/**
-		 *	Sets all expansion states in the tree.
-		 *
-		 *	@param bInExpansionState			The expansion state to set the tree to.
-		 */
-		void SetAllExpansionStates(bool bInExpansionState);
-
-		/**
-		 *	A helper function to recursively set the tree.
-		 *
-		 *	@param	InNode						The current node in the tree.
-		 *	@param	bInExpansionState			The expansion state to set the tree to.
-		 */
-		void SetAllExpansionStates_Helper(TSharedPtr<FEnumViewerNode> InNode, bool bInExpansionState);
-
-		/**
-		 *	A helper function to toggle expansion state of a single node
-		 *
-		 *	@param	InNode						The node to toggle expansion.
-		 */
-		void ToggleExpansionState_Helper(TSharedPtr<FEnumViewerNode> InNode);
-
 		/** Builds the right click menu widget for the selected node. */
 		TSharedPtr<SWidget> BuildMenuWidget();
-
-		/** Recursive function to expand nodes not filtered out of the tree
-		*	@param	InNode				The current node to inspect for expansion.
-		*
-		*	@return bool				true if the child expanded, thus the parent should.
-		*/
-		bool ExpandFilteredInNodes(TSharedPtr<FEnumViewerNode> InNode);
-
-		/** Recursive function to map the expansion states of items in the tree.
-		 *	@param InItem		The current item to examine the expansion state of.
-		 */
-		void MapExpansionStatesInTree(TSharedPtr<FEnumViewerNode> InItem);
-
-		/** Recursive function to set the expansion states of items in the tree.
-		 *	@param InItem		The current item to set the expansion state of.
-		 */
-		void SetExpansionStatesInTree(TSharedPtr<FEnumViewerNode> InItem);
 
 		/** Sends a requests to the Enum Viewer to refresh itself the next chance it gets */
 		void Refresh();
@@ -138,10 +86,7 @@ namespace EnumViewer
 		void Populate();
 
 		/** Returns an array of the currently selected EnumViewerNodes */
-		const TArray<TSharedPtr<FEnumViewerNode>> GetSelectedItems() const;
-
-		/** Expands all of the root nodes */
-		virtual void ExpandRootNodes();
+		TArray<TSharedPtr<FEnumViewerNode>> GetSelectedItems() const;
 
 		/** Returns the foreground color for the view button */
 		FSlateColor GetViewButtonForegroundColor() const;
@@ -171,10 +116,7 @@ namespace EnumViewer
 		bool IsToggleShowInternalEnumsAllowed() const;
 
 		/** Get the total number of enums passing the current filters.*/
-		const int GetNumItems() const;
-
-		/** Count the number of tree items in the specified hierarchy*/
-		int32 CountTreeItems(FEnumViewerNode* Node);
+		int32 GetNumItems() const;
 
 		/** Handle the settings for EnumViewer changing.*/
 		void HandleSettingChanged(FName PropertyName);
@@ -202,36 +144,36 @@ namespace EnumViewer
 		TSharedPtr<SSearchBox> SearchBox;
 
 		/** true to filter for unloaded enums. */
-		bool bShowUnloadedEnums;
+		bool bShowUnloadedEnums = false;
 
 		/** true to allow enum dynamic loading. */
-		bool bEnableEnumDynamicLoading;
+		bool bEnableEnumDynamicLoading = false;
 
 		/** Callback that's fired when a enum is selected while in 'enum picking' mode */
 		FOnEnumPicked OnEnumPicked;
 
 		/** true if expansions states should be saved when compiling. */
-		bool bSaveExpansionStates;
+		bool bSaveExpansionStates = false;
 
 		/** The map holding the expansion state map for the tree. */
 		TMap<FName, bool> ExpansionStateMap;
 
 		/** True if the Enum Viewer needs to be repopulated at the next appropriate opportunity, occurs whenever enums are added, removed, renamed, etc. */
-		bool bNeedsRefresh;
+		bool bNeedsRefresh = false;
 
 		/** True if the search box will take keyboard focus next frame */
-		bool bPendingFocusNextFrame;
+		bool bPendingFocusNextFrame = false;
 
 		/** True if we need to set the tree expansion states according to our local copy next tick */
-		bool bPendingSetExpansionStates;
+		bool bPendingSetExpansionStates = false;
 
 		/** Indicates if the 'Show Internal Enums' option should be enabled or disabled */
-		bool bCanShowInternalEnums;
+		bool bCanShowInternalEnums = false;
 
 		/** The button that displays view options */
 		TSharedPtr<SComboButton> ViewOptionsComboButton;
 
 		/** Number of enums that passed the filter*/
-		int32 NumEnums;
+		int32 NumEnums = 0;
 	};
 }
