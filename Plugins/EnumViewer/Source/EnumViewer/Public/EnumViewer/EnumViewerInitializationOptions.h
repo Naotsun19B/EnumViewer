@@ -55,10 +55,7 @@ namespace EnumViewer
 
 		// Shows a "None" option, only available in picker mode.
 		bool bShowNoneOption;
-
-		// If true, root nodes will be expanded by default.
-		bool bExpandRootNodes;
-
+		
 		// If true, allows enum dynamic loading on selection.
 		bool bEnableEnumDynamicLoading;
 
@@ -86,7 +83,6 @@ namespace EnumViewer
 			: Mode(EEnumViewerMode::EnumPicker)
 			, bShowUnloadedEnums(true)
 			, bShowNoneOption(false)
-			, bExpandRootNodes(true)
 			, bEnableEnumDynamicLoading(true)
 			, NameTypeToDisplay(EEnumViewerNameTypeToDisplay::EnumName)
 			, bAllowViewOptions(true)

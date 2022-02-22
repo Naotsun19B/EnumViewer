@@ -42,11 +42,11 @@ public:
 	TArray<TSoftObjectPtr<const UEnum>> InternalOnlyEnums;
 
 	// Whether to display internal use structs.
-	UPROPERTY(EditAnywhere, Config, Category = "Enum Viewer")
+	UPROPERTY(Config)
 	bool bDisplayInternalEnums;
 
 	// The developer folder view modes used in SStructViewer
-	UPROPERTY(EditAnywhere, Config, Category = "Enum Viewer")
+	UPROPERTY(Config)
 	EEnumViewerDeveloperType DeveloperFolderType;
 
 public:

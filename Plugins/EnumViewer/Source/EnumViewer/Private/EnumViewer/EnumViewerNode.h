@@ -72,7 +72,7 @@ namespace EnumViewer
 		FEnumViewerNode();
 
 		// Create a node representing the given data.
-		FEnumViewerNode(const TSharedRef<FEnumViewerNodeData>& InData, const TSharedPtr<IPropertyHandle>& InPropertyHandle, const bool InPassedFilter);
+		FEnumViewerNode(const TSharedRef<FEnumViewerNodeData>& InData, const TSharedPtr<IPropertyHandle>& InPropertyHandle, const bool bInPassedFilter);
 
 		// Get the unlocalized name of the enum we represent.
 		const FString& GetEnumName() const;

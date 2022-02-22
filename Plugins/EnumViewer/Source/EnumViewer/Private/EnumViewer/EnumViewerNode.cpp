@@ -18,7 +18,7 @@ namespace EnumViewer
 
 	FEnumViewerNodeData::FEnumViewerNodeData(const UEnum* InEnum)
 		: EnumName(InEnum->GetName())
-		, EnumDisplayName(FText::FromString(InEnum->GetName()))
+		, EnumDisplayName(FText::FromString(InEnum->GetMetaData(TEXT("DisplayName"))))
 		, EnumPath(*InEnum->GetPathName())
 		, Enum(InEnum)
 	{
@@ -33,7 +33,7 @@ namespace EnumViewer
 
 		// Cache the resolved display name if available, or synthesize one if the enum asset is unloaded
 		EnumDisplayName = Enum.IsValid()
-			? FText::FromString(Enum->GetName())
+			? FText::FromString(Enum->GetMetaData(TEXT("DisplayName")))
 			: FText::AsCultureInvariant(FName::NameToDisplayString(EnumName, false));
 	}
 
@@ -81,7 +81,7 @@ namespace EnumViewer
 		// Re-cache the resolved display name as it may be different than the one we synthesized for an unloaded enum asset
 		if (Enum.IsValid())
 		{
-			EnumDisplayName = FText::FromString(Enum->GetName());
+			EnumDisplayName = FText::FromString(Enum->GetMetaData(TEXT("DisplayName")));
 			return true;
 		}
 
@@ -105,10 +105,10 @@ namespace EnumViewer
 	{
 	}
 
-	FEnumViewerNode::FEnumViewerNode(const TSharedRef<FEnumViewerNodeData>& InData, const TSharedPtr<IPropertyHandle>& InPropertyHandle, const bool InPassedFilter)
+	FEnumViewerNode::FEnumViewerNode(const TSharedRef<FEnumViewerNodeData>& InData, const TSharedPtr<IPropertyHandle>& InPropertyHandle, const bool bInPassedFilter)
 		: NodeData(InData)
 		, PropertyHandle(InPropertyHandle)
-		, bPassedFilter(InPassedFilter)
+		, bPassedFilter(bInPassedFilter)
 	{
 	}
 
