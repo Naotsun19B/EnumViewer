@@ -49,10 +49,7 @@ namespace EnumViewer
 		virtual bool SupportsKeyboardFocus() const override;
 		virtual FReply OnDragDetected(const FGeometry& Geometry, const FPointerEvent& PointerEvent) override;
 		// End of SWidget interface.
-
-		// Test to see whether the given enum would be allowed by this enum viewer. 
-		virtual bool IsEnumAllowed(const UEnum* InEnum) const;
-
+		
 		// Destroys the internal Enum Hierarchy database. 
 		static void DestroyEnumHierarchy();
 
