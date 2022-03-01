@@ -2,9 +2,10 @@
 
 #include "EnumViewer/IEnumViewer.h"
 #include "EnumViewer/EnumViewerGlobals.h"
-#include "EnumViewer/EnumViewerSettings.h"
-#include "EnumViewer/EnumPickerTab.h"
-#include "EnumViewer/SEnumViewer.h"
+#include "EnumViewer/Utilities/EnumViewerProjectSettings.h"
+#include "EnumViewer/Utilities/EnumBrowserTab.h"
+#include "EnumViewer/Data/EnumRegistry.h"
+#include "EnumViewer/Widgets/SEnumViewer.h"
 #include "Modules/ModuleManager.h"
 
 DEFINE_LOG_CATEGORY(LogEnumViewer);
@@ -32,19 +33,22 @@ namespace EnumViewer
 	void FEnumViewerModule::StartupModule()
 	{
 		// Register settings.
-		UEnumViewerSettings::Register();
+		UEnumViewerProjectSettings::Register();
 		
 		// Register enum picker tab.
-		FEnumPickerTab::Register();
+		FEnumBrowserTab::Register();
 	}
 
 	void FEnumViewerModule::ShutdownModule()
 	{
+		// Release the data collected by the enum registry.
+		FEnumRegistry::DestroyInstance();
+		
 		// Unregister enum picker tab.
-		FEnumPickerTab::Unregister();
+		FEnumBrowserTab::Unregister();
 
 		// Unregister settings.
-		UEnumViewerSettings::Unregister();
+		UEnumViewerProjectSettings::Unregister();
 	}
 
 	TSharedRef<SWidget> FEnumViewerModule::CreateEnumViewer(
@@ -53,7 +57,7 @@ namespace EnumViewer
 	)
 	{
 		return SNew(SEnumViewer, InitOptions)
-			.OnEnumPickedDelegate(OnEnumPickedDelegate);
+			.OnEnumPicked(OnEnumPickedDelegate);
 	}
 }
 

@@ -6,7 +6,7 @@
 
 namespace EnumViewer
 {
-	class ENUMVIEWER_API FEnumPickerTab
+	class FEnumBrowserTab
 	{
 	public:
 		// A string that is displayed as the title of the window with the unique name of the tab.

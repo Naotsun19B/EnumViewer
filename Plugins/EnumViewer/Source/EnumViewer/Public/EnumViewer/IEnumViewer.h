@@ -4,7 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Modules/ModuleInterface.h"
-#include "EnumViewerInitializationOptions.h"
+#include "EnumViewer/Types/EnumViewerInitializationOptions.h"
 
 class SWidget;
 

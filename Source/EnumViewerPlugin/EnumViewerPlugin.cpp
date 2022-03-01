@@ -4,7 +4,7 @@
 #include "Modules/ModuleManager.h"
 #include "EnumViewer/IEnumViewer.h"
 #include "EnumViewer/EnumViewerGlobals.h"
-#include "EnumViewer/EnumViewerFilter.h"
+#include "EnumViewer/Types/EnumViewerFilter.h"
 
 namespace EnumViewer
 {

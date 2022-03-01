@@ -33,6 +33,8 @@ public class EnumViewer : ModuleRules
 				"SlateCore", 
 				"EditorStyle",
 				"EditorWidgets",
+				"WorkspaceMenuStructure",
+				
 				"ContentBrowserData",
 			}
 		);
