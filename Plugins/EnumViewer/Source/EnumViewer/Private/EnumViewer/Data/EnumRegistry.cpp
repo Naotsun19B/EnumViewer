@@ -1,7 +1,7 @@
 // Copyright 2022 Naotsun. All Rights Reserved.
 
 #include "EnumViewer/Data/EnumRegistry.h"
-#include "AssetRegistry/AssetRegistryModule.h"
+#include "AssetRegistryModule.h"
 #include "Misc/HotReloadInterface.h"
 #include "Misc/ScopedSlowTask.h"
 #include "Engine/UserDefinedEnum.h"

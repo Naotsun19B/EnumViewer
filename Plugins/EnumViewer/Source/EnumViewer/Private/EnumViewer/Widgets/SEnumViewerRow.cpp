@@ -38,7 +38,7 @@ namespace EnumViewer
 				.Text(EnumDisplayName)
 				.HighlightText(InArgs._HighlightText)
 				.ColorAndOpacity(this, &SEnumViewerRow::GetTextColor)
-				.ToolTip(this, &SEnumViewerRow::GetTextTooltip)
+				.ToolTip(GetTextTooltip())
 				.IsEnabled(!bIsRestricted)
 			]
 			+SHorizontalBox::Slot()
@@ -107,7 +107,7 @@ namespace EnumViewer
 
 	TSharedPtr<IToolTip> SEnumViewerRow::GetTextTooltip() const
 	{
-		TSharedPtr<IToolTip> ToolTip;
+		TSharedPtr<IToolTip> TextToolTip;
 
 		const TSharedPtr<IPropertyHandle> PropertyHandle = AssociatedNode->GetPropertyHandle();
 		if (PropertyHandle && AssociatedNode->IsRestricted())
@@ -118,7 +118,7 @@ namespace EnumViewer
 				RestrictionToolTip
 			);
 
-			ToolTip = IDocumentation::Get()->CreateToolTip(
+			TextToolTip = IDocumentation::Get()->CreateToolTip(
 				RestrictionToolTip,
 				nullptr,
 				{},
@@ -127,11 +127,11 @@ namespace EnumViewer
 		}
 		else if (!AssociatedNode->GetEnumPath().IsNone())
 		{
-			ToolTip = SNew(SToolTip)
+			TextToolTip = SNew(SToolTip)
 				.Text(FText::FromName(AssociatedNode->GetEnumPath()));
 		}
 
-		return ToolTip;
+		return TextToolTip;
 	}
 
 	EVisibility SEnumViewerRow::GetOptionsVisibility() const

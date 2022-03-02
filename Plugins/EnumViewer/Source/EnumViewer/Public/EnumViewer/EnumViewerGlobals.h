@@ -8,10 +8,10 @@
 /**
  * Macro to support each engine version.
  */
-#if ENGINE_MAJOR_VERSION == 4 && ENGINE_MINOR_VERSION <= 24
-#define BEFORE_UE_4_24 1
+#if ENGINE_MAJOR_VERSION == 4 && ENGINE_MINOR_VERSION <= 25
+#define BEFORE_UE_4_25 1
 #else
-#define BEFORE_UE_4_24 0
+#define BEFORE_UE_4_25 0
 #endif
 
 /**

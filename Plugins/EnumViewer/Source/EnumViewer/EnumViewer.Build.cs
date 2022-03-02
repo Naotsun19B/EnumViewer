@@ -33,9 +33,11 @@ public class EnumViewer : ModuleRules
 				"SlateCore", 
 				"EditorStyle",
 				"EditorWidgets",
+				"AssetRegistry",
 				"WorkspaceMenuStructure",
-				
+#if UE_4_26_OR_LATER
 				"ContentBrowserData",
+#endif
 			}
 		);
 		

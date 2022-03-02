@@ -17,7 +17,7 @@
 	"Modules": [
 		{
 			"Name": "EnumViewer",
-			"Type": "Runtime",
+			"Type": "EditorNoCommandlet",
 			"LoadingPhase": "Default",
 			"WhitelistPlatforms": [
 				"Win64",

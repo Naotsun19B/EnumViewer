@@ -1,6 +1,7 @@
 // Copyright 2022 Naotsun. All Rights Reserved.
 
 #include "EnumViewer/Widgets/SEnumViewer.h"
+#include "EnumViewer/EnumViewerGlobals.h"
 #include "EnumViewer/Utilities/EnumViewerSettings.h"
 #include "EnumViewer/Utilities/EnumViewerProjectSettings.h"
 #include "EnumViewer/Utilities/EnumViewerUtils.h"
@@ -13,14 +14,60 @@
 #include "SListViewSelectorDropdownMenu.h"
 #include "Misc/TextFilterExpressionEvaluator.h"
 #include "EditorWidgetsModule.h"
-#include "AssetRegistry/AssetRegistryModule.h"
+#include "AssetRegistryModule.h"
 
+#if BEFORE_UE_4_25
+#include "DragAndDrop/AssetDragDropOp.h"
+#else
 #include "ContentBrowserDataDragDropOp.h"
+#endif
 
 #define LOCTEXT_NAMESPACE "EnumViewer"
 
 namespace EnumViewer
 {
+#if BEFORE_UE_4_25
+	namespace TextFilter
+	{
+		/**
+		 * Before UE 4.25, there is no FBasicStringFilterExpressionContext,
+		 * so define your own custom text filter.
+		 */
+		class FEnumFilterContext : public ITextFilterExpressionContext
+		{
+		public:
+			// Constructor.
+			explicit FEnumFilterContext(const FString& InStr)
+				: StrPtr(&InStr)
+			{
+			}
+
+			// ITextFilterExpressionContext interface.
+			virtual bool TestBasicStringExpression(
+				const FTextFilterString& InValue,
+				const ETextFilterTextComparisonMode InTextComparisonMode
+			) const override
+			{
+				return TextFilterUtils::TestBasicStringExpression(*StrPtr, InValue, InTextComparisonMode);
+			}
+			virtual bool TestComplexExpression(
+				const FName& InKey,
+				const FTextFilterString& InValue,
+				const ETextFilterComparisonOperation InComparisonOperation,
+				const ETextFilterTextComparisonMode InTextComparisonMode
+			) const override
+			{
+				return false;
+			}
+			// End of ITextFilterExpressionContext interface.
+
+		private:
+			const FString* StrPtr;
+		};
+	}
+	using FBasicStringFilterExpressionContext = TextFilter::FEnumFilterContext;
+#endif
+	
 	void SEnumViewer::Construct(const FArguments& InArgs, const FEnumViewerInitializationOptions& InInitOptions)
 	{
 		InitOptions = InInitOptions;
@@ -256,7 +303,11 @@ namespace EnumViewer
 					const FAssetData AssetData = FAssetRegistryModule::GetRegistry().GetAssetByObjectPath(SelectedItem->GetEnumPath());
 					if (AssetData.IsValid())
 					{
+#if BEFORE_UE_4_25
+						return FReply::Handled().BeginDragDrop(FAssetDragDropOp::New(AssetData));
+#else
 						return FReply::Handled().BeginDragDrop(FContentBrowserDataDragDropOp::Legacy_New(MakeArrayView(&AssetData, 1)));
+#endif
 					}
 				}
 			}
