@@ -428,6 +428,22 @@ namespace EnumViewer
 		// Get the enum list, passing in certain filter options.
 		EnumNodes = FEnumRegistry::Get().GetNodeList(InitOptions.PropertyHandle, FilterPredicate);
 		
+		// In picker mode, delete the ones that did not clear the filter.
+		if (InitOptions.Mode == EEnumViewerMode::EnumPicker)
+		{
+			EnumNodes.RemoveAll(
+				[](const TSharedPtr<FEnumViewerNode>& EnumViewerNode) -> bool
+				{
+					if (EnumViewerNode.IsValid())
+					{
+						return !EnumViewerNode->PassedFilter();
+					}
+
+					return true;
+				}
+			);
+		}
+		
 		// Sort the list alphabetically.
 		EnumNodes.Sort(
 			[](const TSharedPtr<FEnumViewerNode>& Lhs, const TSharedPtr<FEnumViewerNode>& Rhs) -> bool
